@@ -40,7 +40,14 @@ def env_bool(name, default=False):
 
 def env_list(name, default=''):
     value = os.getenv(name, default)
-    return [item.strip() for item in value.split(',') if item.strip()]
+    items = []
+    for item in value.split(','):
+        cleaned = item.strip().strip('"').strip("'")
+        if '=' in cleaned and cleaned.startswith(f'{name}='):
+            cleaned = cleaned.split('=', 1)[1].strip().strip('"').strip("'")
+        if cleaned:
+            items.append(cleaned)
+    return items
 
 
 def db_ca_cert_path():
@@ -86,6 +93,13 @@ ALLOWED_HOSTS = env_list(
 render_hostname = os.getenv('RENDER_EXTERNAL_HOSTNAME')
 if render_hostname:
     ALLOWED_HOSTS.append(render_hostname)
+
+vercel_url = os.getenv('VERCEL_URL')
+if vercel_url:
+    ALLOWED_HOSTS.append(vercel_url)
+
+if env_bool('VERCEL', False):
+    ALLOWED_HOSTS.extend(['.vercel.app', 'projeto-miranda.vercel.app'])
 
 ALLOWED_HOSTS = list(dict.fromkeys(ALLOWED_HOSTS))
 if not DEBUG and not ALLOWED_HOSTS:
@@ -567,11 +581,35 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
+IS_VERCEL = env_bool('VERCEL', False)
+ENABLE_FILE_LOGGING = env_bool('ENABLE_FILE_LOGGING', not DEBUG) and not IS_VERCEL
+
 LOG_DIR = BASE_DIR / 'logs'
-LOG_DIR.mkdir(exist_ok=True)
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 DJANGO_LOG_LEVEL = os.getenv('DJANGO_LOG_LEVEL', LOG_LEVEL)
 API_LOG_LEVEL = os.getenv('API_LOG_LEVEL', LOG_LEVEL)
+
+logging_handlers = {
+    'console': {
+        'class': 'logging.StreamHandler',
+        'formatter': 'console',
+        'filters': ['request_context'],
+    },
+}
+
+active_handlers = ['console']
+
+if ENABLE_FILE_LOGGING:
+    LOG_DIR.mkdir(exist_ok=True)
+    logging_handlers['file'] = {
+        'class': 'logging.handlers.RotatingFileHandler',
+        'filename': str(LOG_DIR / 'django.log'),
+        'maxBytes': 10 * 1024 * 1024,
+        'backupCount': 5,
+        'formatter': 'json',
+        'filters': ['request_context'],
+    }
+    active_handlers.append('file')
 
 LOGGING = {
     'version': 1,
@@ -593,33 +631,19 @@ LOGGING = {
             ),
         },
     },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'console',
-            'filters': ['request_context'],
-        },
-        'file': {
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': str(LOG_DIR / 'django.log'),
-            'maxBytes': 10 * 1024 * 1024,
-            'backupCount': 5,
-            'formatter': 'json',
-            'filters': ['request_context'],
-        },
-    },
+    'handlers': logging_handlers,
     'root': {
-        'handlers': ['console'] if DEBUG else ['console', 'file'],
+        'handlers': active_handlers,
         'level': LOG_LEVEL,
     },
     'loggers': {
         'django': {
-            'handlers': ['console'] if DEBUG else ['console', 'file'],
+            'handlers': active_handlers,
             'level': DJANGO_LOG_LEVEL,
             'propagate': False,
         },
         'api': {
-            'handlers': ['console'] if DEBUG else ['console', 'file'],
+            'handlers': active_handlers,
             'level': API_LOG_LEVEL,
             'propagate': False,
         },
