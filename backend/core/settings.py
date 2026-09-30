@@ -40,7 +40,14 @@ def env_bool(name, default=False):
 
 def env_list(name, default=''):
     value = os.getenv(name, default)
-    return [item.strip() for item in value.split(',') if item.strip()]
+    items = []
+    for item in value.split(','):
+        cleaned = item.strip().strip('"').strip("'")
+        if '=' in cleaned and cleaned.startswith(f'{name}='):
+            cleaned = cleaned.split('=', 1)[1].strip().strip('"').strip("'")
+        if cleaned:
+            items.append(cleaned)
+    return items
 
 
 def db_ca_cert_path():
@@ -83,6 +90,13 @@ ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', default_allowed_hosts)
 render_hostname = os.getenv('RENDER_EXTERNAL_HOSTNAME')
 if render_hostname:
     ALLOWED_HOSTS.append(render_hostname)
+
+vercel_url = os.getenv('VERCEL_URL')
+if vercel_url:
+    ALLOWED_HOSTS.append(vercel_url)
+
+if env_bool('VERCEL', False):
+    ALLOWED_HOSTS.extend(['.vercel.app', 'projeto-miranda.vercel.app'])
 
 ALLOWED_HOSTS = list(dict.fromkeys(ALLOWED_HOSTS))
 if not DEBUG and not ALLOWED_HOSTS:
